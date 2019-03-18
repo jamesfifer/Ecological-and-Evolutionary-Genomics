@@ -1,0 +1,491 @@
+---
+title: "BI594 HW2 NMDS"
+author: "James Fifer, Claudia Mazur, Alia  Al-Haj"
+date: "March 14, 2019"
+output: html_document
+---
+### Visualization of population genetic presence/absence data in *Acropora* coral using standard PCA and NMDS analyses
+
+*Acropora hyacinthus* and *Acropora digitifera* are two species of Acroporid coral found in the Micronesian Pacific. In this study we analyzed the allelic structure of two species using presence/absence data. The data set used for this study was collected by Davies et., (2019) and contains 281 *A. digitifera* samples and 287 samples of *A. hyacinthus*. We used the data set to observe the similarity across Micronesian islands, within islands (i.e., sites) and across species. We visualized these relationships using a standard PCoA based on identity by state (IBS) and found the most distinct clustering pattern occured between islands. From these results, we conducted an NMDS analysis between islands using the *metaMDS* function in the *vegan* package in R (Oksanen et al., 2013). Within our NMDS analyses we explored Euclidean, Bray-Curtis and Jaccard distances. Overall, we found samples collected at Palau and Ngulu are different from the rest of the islands. 
+
+Version Control:
+R version 3.5.1 (2018-07-02)
+"ggplot2" 3.1.0
+"adegenet" 2.1.1
+"vegan" 2.5.4
+
+The PCoA part of this script is based on the angsd_ibs_pca.R script from  
+https://github.com/z0on/2bRAD_denovo/blob/master/2bRAD_README.txt
+more info can be found here: https://github.com/z0on/2bRAD_denovo
+modified by Nicola Kriefall for use with Boston University's SCC, Jan. 2019
+modified by Davies in Feb 2019 to run with EEG class. 
+
+
+```{r setup, include=FALSE}
+#loading packages and setting up
+
+library(vegan)
+library(adegenet)
+library(ggplot2)
+setwd("C:/Users/james/Documents/BOSTON/Ecological & evolutionary genomics/HW2")
+
+#Read in the file
+#This is a dataset that is presence absence of an allele in each individual coral from Davies et al., 2019 doi: https://doi.org/10.1101/575183
+ ma1 = read.csv("10.Supp_File3_binary.csv", skip = 1)
+
+ 
+```
+
+First we performed a PCoA based on identity by state (IBS). There were three different factors we could have chosen for our constraints/clusters: island, site (two within each island except for Guam (1)) and species (digitifera and hyacinthus). We examined the clustering when using each of the three factors as the condition of interest. 
+
+First we looked at clustering according to site. 
+```{r, results="hide"}
+ma2= ma1[, -c(1:4)]#create matrix with allele presence absence only (no descriptive variables)
+ma2<-as.matrix(ma2)
+
+#--Site--#
+site=ma1$site #Set site variable
+
+#Set up color pallete for site
+palette(rainbow(length(unique(site))))
+ colors=as.numeric(as.factor(site))
+ colpops=as.numeric(as.factor(sort(unique(site))))
+
+head(site) #look st the site vector
+conds=data.frame(cbind(site)) #make a dataframe from site vector with sites as numbers
+head(conds)
+```
+
+We use the function capscale to obtain a null model of ordination (pp0). This means points will be plotted based on euclidean distances, but not constrained by any additional conditions. We also examine ordination under specific constraints (pp model). CCA does not try to display all variation in the data, but only the part that can be explained by the used constraints. CA is the variability that is not explained by the constraints. 
+
+```{r }
+pp0=capscale(ma2~1) #pCCA and CCA null means no ordination results for partial and constrained components of the model, only results for CA unconstrained components of the model. This is essentially our null model
+pp=capscale(ma2~site,as.factor(conds)) #pCCA null, CCA list of 14, CA list of 7. The contrained components are the sites. 
+#default for capscale distance is euclidean 
+
+# significance of by-site divergence
+adonis(ma2~site,conds) #Significant divergence here
+#Adonis does a permutational manova using distance matrices so basically it is saying that site means of presence genes at sites are different.
+
+# eigenvectors
+plot(pp0$CA$eig)
+#What happens if we plot the eigenvectors for site?
+plot(pp$CA$eig) #graph only goes to 0.4 instead of 1, so better constrained here.
+plot(pp$CCA$eig)
+
+axes2plot=c(1,2)
+cmd=pp0
+plot(cmd,choices=axes2plot,display="sites",type="n") # choices - axes to display
+points(cmd,choices=axes2plot,pch=19,col=transp(colors,alpha=0.7))
+#ordihull(cmd,choices= axes2plot,groups= conds$grp,draw="polygon",col=1+as.numeric(unique(as.factor(conds$grp))),label=T)
+ordispider(cmd,choices= axes2plot,groups=conds$site,col="grey80")
+ordiellipse(cmd,choices= axes2plot,groups= conds$site,draw="polygon",col=colpops,label=T)
+legend("bottomleft", cex=0.75, legend = c("1 = Ant Atoll", "2 = Coral Garden", "3 = Goofnuw Channel", "4 = Hiroshi Point", "5 = Lighthouse Reef", "6 = Ngulu Atoll", "7 = Pago Bay", "8 = Roj", "9 = South East Pass", "10 = South Tip Reef", "11 = Tanguisson", "12 = West Channel", "13 = West Polle"), xpd = TRUE, ncol = 1, inset = c(0,-1.0), fill=colpops)
+
+# unscaled, to identify outliers
+plot(cmd$CA$u[,axes2plot],pch=19,col=colors)
+ordispider(cmd$CA$u[,axes2plot],groups=conds$site,col="grey80")
+ordiellipse(cmd$CA$u[,axes2plot],groups= conds$site,draw="polygon",col=colpops,label=T)
+#identify(cmd$CA$u[,axes2plot],labels=colnames(ma2),n=3,cex=0.7)
+legend("bottomleft", cex= 0.75, legend = c("1 = Ant Atoll", "2 = Coral Garden", "3 = Goofnuw Channel", "4 = Hiroshi Point", "5 = Lighthouse Reef", "6 = Ngulu Atoll", "7 = Pago Bay", "8 = Roj", "9 = South East Pass", "10 = South Tip Reef", "11 = Tanguisson", "12 = West Channel", "13 = West Polle"), ncol = 2, fill=colpops)
+```
+
+The scaled graph normally uses the CA and CCA when plotting clusters whereas the unscaled only uses CA. The reason the two graphs look the same here is because the pp0 model only contains CA values, thus there are no CCA values to plot. 
+
+We can use the pp model to view clustering according to established constraints. 
+```{r }
+#What if we use pp?
+cmd1=pp
+plot(cmd1,choices=axes2plot,display="sites",type="n") # choices - axes to display
+points(cmd1,choices=axes2plot,pch=19,col=transp(colors,alpha=0.7))
+
+ordispider(cmd1,choices= axes2plot,groups=conds$site,col="grey80")
+ordiellipse(cmd1,choices= axes2plot,groups= conds$site,draw="polygon",col=colpops,label=T)
+legend("bottomleft", cex=0.75, legend = c("1 = Ant Atoll", "2 = Coral Garden", "3 = Goofnuw Channel", "4 = Hiroshi Point", "5 = Lighthouse Reef", "6 = Ngulu Atoll", "7 = Pago Bay", "8 = Roj", "9 = South East Pass", "10 = South Tip Reef", "11 = Tanguisson", "12 = West Channel", "13 = West Polle"), ncol = 1, fill=colpops)
+
+
+# unscaled, to identify outliers
+plot(cmd1$CA$u[,axes2plot],pch=19,col=colors)
+ordispider(cmd1$CA$u[,axes2plot],groups=conds$site,col="grey80")
+ordiellipse(cmd1$CA$u[,axes2plot],groups= conds$site,draw="polygon",col=colpops,label=T)
+
+legend("bottomleft", cex=0.75, legend = c("1 = Ant Atoll", "2 = Coral Garden", "3 = Goofnuw Channel", "4 = Hiroshi Point", "5 = Lighthouse Reef", "6 = Ngulu Atoll", "7 = Pago Bay", "8 = Roj", "9 = South East Pass", "10 = South Tip Reef", "11 = Tanguisson", "12 = West Channel", "13 = West Polle"), fill=colpops)
+```
+
+Sites Ngulu Atoll and Lighthouse Reef and West Channel cluster seperately from the rest of the sites. Goofnuw Channel also appears to have high variation between samples. CA (as represented in the unscaled plot) here is the variability not explained by the constraints, this is why we see practically no clustering for the unscaled plot.   
+
+Next we looked at clustering according to Species. 
+
+```{r }
+#--Species--#
+#Set what condition you want to look at 
+species=ma1$spp
+ 
+
+# settign up colors for plotting
+palette(rainbow(length(unique(species))))
+colors=as.numeric(as.factor(species))
+colpops=as.numeric(as.factor(sort(unique(species))))
+
+
+# performing PCoA and CAP
+head(species)
+condssp=data.frame(cbind(species))
+head(condssp)
+ppsp0=capscale(ma2~1) #pCCA and CCA null means no ordination results for partial and constrained components of the model, only results for CA unconstrained components of the model. This is essentially our null model
+ppsp=capscale(ma2~species,as.factor(condssp)) #pCCA null, CCA list of 14, CA list of 7. The contrained components are the species
+
+# significance of by-site divergence
+adonis(ma2~species,condssp) #Significant divergence here
+
+# eigenvectors
+plot(ppsp0$CA$eig)
+#What happens if we plot the eigenvectors for species?
+plot(ppsp$CA$eig) #
+plot(ppsp$CCA$eig)
+
+axes2plot=c(1,2)  
+cmdsp=ppsp0
+plot(cmdsp,choices=axes2plot,display="species",type="n") # choices - axes to display
+points(cmdsp,choices=axes2plot,pch=19,col=transp(colors,alpha=0.7))
+#ordihull(cmd,choices= axes2plot,groups= conds$grp,draw="polygon",col=1+as.numeric(unique(as.factor(conds$grp))),label=T)
+ordispider(cmdsp,choices= axes2plot,groups=condssp$species,col="grey80")
+ordiellipse(cmdsp,choices= axes2plot,groups= condssp$species,draw="polygon",col=colpops,label=T)
+legend("bottomleft", cex=0.75, legend = c("1 = A. digitifera", "2 = A. hyacinthus "), fill=colpops)
+
+
+# unscaled, to identify outliers
+plot(cmdsp$CA$u[,axes2plot],pch=19,col=colors)
+ordispider(cmdsp$CA$u[,axes2plot],groups=condssp$species,col="grey80")
+ordiellipse(cmdsp$CA$u[,axes2plot],groups= condssp$species,draw="polygon",col=colpops,label=T)
+#identify(cmdsp$CA$u[,axes2plot],labels=colnames(ma2),n=3,cex=0.7)
+legend("bottomleft", cex=0.75, legend = c("1 = A. digitifera", "2 = A. hyacinthus "), fill=colpops)
+```
+
+This time the null model shows very little clustering according to our condition (species), this suggests that if there is clustering according to this particular condition it is not strong enough to show up in the null model.
+
+```{r }
+#What if we use pp?
+cmd1sp=ppsp
+plot(cmd1sp,choices=axes2plot,display="species",type="n") # choices - axes to display
+points(cmd1sp,choices=axes2plot,pch=19,col=transp(colors,alpha=0.7))
+#ordihull(cmd,choices= axes2plot,groups= conds$grp,draw="polygon",col=1+as.numeric(unique(as.factor(conds$grp))),label=T)
+ordispider(cmd1sp,choices= axes2plot,groups=condssp$species,col="grey80")
+ordiellipse(cmd1sp,choices= axes2plot,groups= condssp$species,draw="polygon",col=colpops,label=T)
+legend("bottomleft", cex=0.75, legend = c("1 = A. digitifera", "2 = A. hyacinthus "), fill=colpops)
+
+# unscaled, to identify outliers
+plot(cmd1sp$CA$u[,axes2plot],pch=19,col=colors)
+ordispider(cmd1sp$CA$u[,axes2plot],groups=condssp$species,col="grey80")
+ordiellipse(cmd1sp$CA$u[,axes2plot],groups= condssp$species,draw="polygon",col=colpops,label=T)
+#identify(cmd$CA$u[,axes2plot],labels=colnames(ma2),n=3,cex=0.7)
+legend("bottomleft", cex=0.75, legend = c("1 = A. digitifera", "2 = A. hyacinthus "), fill=colpops)
+```
+
+While there is considerable overlap there is now some visible clustering according to species. 
+
+Next we use the factor island as our constraint. 
+```{r }
+#--Island--#
+
+#Set what condition you want to look at 
+island=ma1$island
+
+
+# settign up colors for plotting
+palette(rainbow(length(unique(island))))
+colors=as.numeric(as.factor(island))
+colpops=as.numeric(as.factor(sort(unique(island))))
+
+
+# performing PCoA and CAP
+head(island)
+condsisl=data.frame(cbind(island))
+head(condsisl)
+ppisl0=capscale(ma2~1) #pCCA and CCA null means no ordination results for partial and constrained components of the model, only results for CA unconstrained components of the model. This is essentially our null model
+ppisl=capscale(ma2~island,as.factor(condsisl)) #pCCA null, CCA list of 14, CA list of 7. The contrained components are the sites
+
+# significance of by-site divergence
+adonis(ma2~island,condsisl) #Significant divergence here
+
+# eigenvectors
+plot(ppisl0$CA$eig)
+#What happens if we plot the eigenvectors for site?
+plot(ppisl$CA$eig) #graph only goes to 0.4 instead of 1, so better constrained here?
+plot(ppisl$CCA$eig)
+
+axes2plot=c(1,2)  
+cmdisl=ppisl0
+plot(cmdisl,choices=axes2plot,display="species",type="n") # choices - axes to display
+points(cmdisl,choices=axes2plot,pch=19,col=transp(colors,alpha=0.7))
+#ordihull(cmd,choices= axes2plot,groups= conds$grp,draw="polygon",col=1+as.numeric(unique(as.factor(conds$grp))),label=T)
+ordispider(cmdisl,choices= axes2plot,groups=condsisl$island,col="grey80")
+ordiellipse(cmdisl,choices= axes2plot,groups= condsisl$island,draw="polygon",col=colpops,label=T)
+legend("bottomleft", cex=0.75, legend = c("1 = Chuuk", "2 = Guam", "3 = Kosrae", "4 = Ngulu", "5 = Palau", "6 = Pohnpei", "7 = Yap"), fill=colpops)
+
+
+# unscaled, to identify outliers
+plot(cmdisl$CA$u[,axes2plot],pch=19,col=colors)
+ordispider(cmdisl$CA$u[,axes2plot],groups=condsisl$island,col="grey80")
+ordiellipse(cmdisl$CA$u[,axes2plot],groups= condsisl$island,draw="polygon",col=colpops,label=T)
+#identify(cmdisl$CA$u[,axes2plot],labels=colnames(ma2),n=7,cex=0.7)
+legend("bottomleft", cex=0.75, legend = c("1 = Chuuk", "2 = Guam", "3 = Kosrae", "4 = Ngulu", "5 = Palau", "6 = Pohnpei", "7 = Yap"), fill=colpops)
+```
+
+```{r}
+#What if we use pp?
+cmd1isl=ppisl
+plot(cmd1isl,choices=axes2plot,display="sites",type="n") # choices - axes to display
+points(cmd1isl,choices=axes2plot,pch=19,col=transp(colors,alpha=0.7))
+#ordihull(cmd,choices= axes2plot,groups= conds$grp,draw="polygon",col=1+as.numeric(unique(as.factor(conds$grp))),label=T)
+ordispider(cmd1isl,choices= axes2plot,groups=condsisl$island,col="grey80")
+ordiellipse(cmd1isl,choices= axes2plot,groups= condsisl$island,draw="polygon",col=colpops,label=T)
+legend("bottomleft", cex=0.75, legend = c("1 = Chuuk", "2 = Guam", "3 = Kosrae", "4 = Ngulu", "5 = Palau", "6 = Pohnpei", "7 = Yap"), fill=colpops)
+
+# unscaled, to identify outliers
+plot(cmd1isl$CA$u[,axes2plot],pch=19,col=colors)
+ordispider(cmd1isl$CA$u[,axes2plot],groups=condsisl$island,col="grey80")
+ordiellipse(cmd1isl$CA$u[,axes2plot],groups= condsisl$island,draw="polygon",col=colpops,label=T)
+#identify(cmd$CA$u[,axes2plot],labels=colnames(ma2),n=3,cex=0.7)
+legend("bottomleft", cex=0.75, legend = c("1 = Chuuk", "2 = Guam", "3 = Kosrae", "4 = Ngulu", "5 = Palau", "6 = Pohnpei", "7 = Yap"), ncol = 3, fill=colpops)
+
+
+```
+
+Here we see clustering. Ngulu and Palau cluster separately from each other and from the other 5 islands. We moved forward with the analysis using "island" as our constraint of interest because this condition had the most obvious clustering. 
+
+
+
+
+We peformed a NMDS analysis using three different distances (Euclidean, Jaccard and Bray-Curtis)
+
+```{r}
+#create matrix without descriptive variables
+ma2= ma1[, -c(1:4)]
+ma2<-as.matrix(ma2)
+
+```
+Function metaMDS uses isoMDS to perform Nonmetric Multidimensional Scaling (NMDS).
+Justification on parameters used:
+
+Autotransform- Uses simple heuristics for possible data transformation of typical community data. Since we do not have community data, we set autotransform = FALSE (default is TRUE).
+
+K reflects the number of dimensions (i.e. number of islands) for the clustering variable. 
+
+Trymax is how many times it will run to look for convergence, use a higher try max if there is no convergence. 
+
+Wascores gives an individual taxon's "species score", computed as the weighted
+average of the "site scores", weights being the abundance of that taxon
+in each site. It is the abundance weighted centroid of all the samples in which the species occurs. Because in our dataset this would be allele in each sample- we don't care about "species scores". 
+```{r, results="hide"}
+
+euc.mds<-metaMDS(ma2, distance = "euclidean", k = 7, trymax = 50, autotransform =FALSE, wascores = FALSE, plot = FALSE) 
+ 
+```
+
+You can use the same code above from the PCoA to plot the NMDS if you would like
+```{r}
+
+#axes2plot=c(1,2)  
+#plot(euc.mds,choices=axes2plot,display="site",type="n")
+#plots the ordination axes
+#points(euc.mds, display = c("site"), pch=19,col=transp(colors,alpha=0.7))#displays both sites and species on the same plot.  Try choosing just "sites" to reduce clutter
+#ordiellipse(euc.mds,choices= axes2plot,groups= conds$site,draw="polygon",col=colpops,label=T)
+
+
+```
+We plotted the NMDS in ggplot instead. First we extracted the data.scores generated from metaMDS. 
+
+```{r}
+data.scores <- as.data.frame(scores(euc.mds))  #Using the scores function from vegan to extract the site scores and convert to a data.frame
+data.scores$sample <- rownames(data.scores)  # create a column of sample names, from the rownames of data.scores
+data.scores$grp <- ma1$site  #  add site, island and species variables
+data.scores$island <-ma1$island
+data.scores$species<- ma1$spp
+#create NMDS.mean to use for graph titles later, takes nmds scores plus variable that you want for ellipses cluster
+NMDS.mean=aggregate(data.scores[,1:2],list(group=data.scores$island),mean)
+
+#This function below is the equivalent of the vegan function ordiellipse (from the PCoA code)
+#Data frame df_ell contains values to show ellipses. 
+#It is calculated with function veganCovEllipse which is hidden in vegan package. 
+#This function is applied to each level of NMDS (island) and it uses also function cov.wt to calculate covariance matrix.
+veganCovEllipse<-function (cov, center = c(0, 0), scale = 1, npoints = 100) 
+{
+  theta <- (0:npoints) * 2 * pi/npoints
+  Circle <- cbind(cos(theta), sin(theta))
+  t(center + scale * t(Circle %*% chol(cov)))
+}
+
+df_ell <- data.frame()
+for(g in levels(data.scores$island)){
+  df_ell <- rbind(df_ell, cbind(as.data.frame(with(data.scores[data.scores$island==g,],
+                                                   veganCovEllipse(cov.wt(cbind(NMDS1,NMDS2),wt=rep(1/length(NMDS1),length(NMDS1)))$cov,center=c(mean(NMDS1),mean(NMDS2)))))
+                                ,group=g))
+}
+
+
+```
+Now we can plot the data
+```{r}
+ggplot(data.scores, aes(NMDS1, NMDS2))+
+  geom_point(data=data.scores,aes(x=NMDS1,y=NMDS2,shape=species,colour=grp)) +
+  geom_polygon(data=df_ell, aes(x=NMDS1, y=NMDS2, fill=group), size=1, alpha=1/2)+ 
+  annotate("text",x=NMDS.mean$NMDS1,y=NMDS.mean$NMDS2,label=NMDS.mean$group)+#gives titles to each cluster
+  labs(title="NMDS Euclidean")+
+  labs(color="site")+theme_bw()+
+  theme(legend.key.size = unit(.3, "cm"), panel.grid.major=element_blank(), panel.grid.minor=element_blank()) #removes background grid
+```
+
+Since we used euclidean distance in our pcoa, we would expect that our nmds plot would look similar to the pcoa we generated before. This seems to be the case. We see similar clustering with Ngulu and Palau clustering apart from the other islands. Euclidean distance equation: d[jk] = sqrt(sum (x[ij]-x[ik])^2)
+
+Bray-curtis and Jaccard are two other common dissimilarity indices, we ran our code using these two indices to see how clustering would change. 
+
+
+The Bray-Curtis dissimilarity index does not calculate a distance, it calculates a dissimilarity index between 0 and 1. Bray-Curtis uses a semi-metric index whereas Jaccard uses a metric index. The equation for Bray-Curtis is d[jk] = (sum abs(x[ij]-x[ik])/(sum (x[ij]+x[ik])). 
+
+```{r NMDS, results="hide"}
+
+bray.mds<-metaMDS(ma2, distance = "bray", k = 7, trymax = 50, autotransform =FALSE, wascores = FALSE, plot = FALSE) 
+ 
+```
+
+You can use the same code from the PCoA to plot the NMDS if you would like
+```{r}
+
+#axes2plot=c(1,2)  
+#plot(bray.mds,choices=axes2plot,display="site",type="n")
+#plots the ordination axes
+#points(bray.mds, display = c("site"), pch=19,col=transp(colors,alpha=0.7))#displays both sites and species on the same plot.  Try choosing just "sites" to reduce clutter
+#ordiellipse(bray.mds,choices= axes2plot,groups= conds$site,draw="polygon",col=colpops,label=T)
+
+
+```
+We plotted the NMDS in ggplot instead. First we extracted the data.scores generated from metaMDS. 
+
+```{r}
+data.scores <- as.data.frame(scores(bray.mds))  #Using the scores function from vegan to extract the site scores and convert to a data.frame
+data.scores$sample <- rownames(data.scores)  # create a column of sample names, from the rownames of data.scores
+data.scores$grp <- ma1$site  #  add site, island and species variables
+data.scores$island <-ma1$island
+data.scores$species<- ma1$spp
+head(data.scores)  #look at the data
+```
+
+Since we cannot directly use vegan in ggplot, we created our own objects and functions to be used for the ellipses and titles in the graph. 
+
+```{r}
+#create NMDS.mean to use for graph titles later, takes nmds scores plus variable that you want for ellipses cluster
+NMDS.mean=aggregate(data.scores[,1:2],list(group=data.scores$island),mean)
+
+#This function below is the equivalent of the vegan function ordiellipse (from the PCoA code)
+#Data frame df_ell contains values to show ellipses. 
+#It is calculated with function veganCovEllipse which is hidden in vegan package. 
+#This function is applied to each level of NMDS (island) and it uses also function cov.wt to calculate covariance matrix.
+
+veganCovEllipse<-function (cov, center = c(0, 0), scale = 1, npoints = 100) 
+{
+  theta <- (0:npoints) * 2 * pi/npoints
+  Circle <- cbind(cos(theta), sin(theta))
+  t(center + scale * t(Circle %*% chol(cov)))
+}
+
+df_ell <- data.frame()
+for(g in levels(data.scores$island)){
+  df_ell <- rbind(df_ell, cbind(as.data.frame(with(data.scores[data.scores$island==g,],
+                                                   veganCovEllipse(cov.wt(cbind(NMDS1,NMDS2),wt=rep(1/length(NMDS1),length(NMDS1)))$cov,center=c(mean(NMDS1),mean(NMDS2)))))
+                                ,group=g))
+}
+
+
+```
+
+Now we can plot the data
+```{r}
+ggplot(data.scores, aes(NMDS1, NMDS2))+
+  geom_point(data=data.scores,aes(x=NMDS1,y=NMDS2,shape=species,colour=grp)) +
+  geom_polygon(data=df_ell, aes(x=NMDS1, y=NMDS2, fill=group), size=1, alpha=1/2)+ 
+  annotate("text",x=NMDS.mean$NMDS1,y=NMDS.mean$NMDS2,label=NMDS.mean$group)+#gives titles to each cluster
+  labs(title="NMDS Bray-Curtis")+
+  labs(color="site")+theme_bw()+
+  theme(legend.key.size = unit(.3, "cm"), panel.grid.major=element_blank(), panel.grid.minor=element_blank()) #removes background grid
+```
+
+We see similar clustering with Ngulu and Palau clustering apart from the other islands, although their orientation is switched compared to euclidean. 
+
+
+
+Jacaard distance is a measure of how dissimilar groups. It is the complement of the Jaccard index (i.e., the similatity coefficient which is a metric index) and can be found by subtracting the Jaccard index from 100%. 
+
+Equation:2B/(1+B), where B is Bray-Curtis dissimilarity
+```{r, results="hide"}
+
+jac.mds<-metaMDS(ma2, distance = "jaccard", k = 7, trymax = 50, autotransform =FALSE, wascores = FALSE, plot = FALSE) 
+ 
+```
+
+You can use the same code from the PCoA to plot the NMDS if you would like
+```{r}
+
+#axes2plot=c(1,2)  
+#plot(jac.mds,choices=axes2plot,display="site",type="n")
+#plots the ordination axes
+#points(jac.mds, display = c("site"), pch=19,col=transp(colors,alpha=0.7))#displays both sites and species on the same plot.  Try choosing just "sites" to reduce clutter
+#ordiellipse(jac.mds,choices= axes2plot,groups= conds$site,draw="polygon",col=colpops,label=T)
+
+
+```
+We plotted the NMDS in ggplot instead. First we extracted the data.scores generated from metaMDS. 
+
+```{r}
+data.scores <- as.data.frame(scores(jac.mds))  #Using the scores function from vegan to extract the site scores and convert to a data.frame
+data.scores$sample <- rownames(data.scores)  # create a column of sample names, from the rownames of data.scores
+data.scores$grp <- ma1$site  #  add site, island and species variables
+data.scores$island <-ma1$island
+data.scores$species<- ma1$spp
+head(data.scores)  #look at the data
+```
+
+Since we cannot directly use vegan in ggplot, we created our own objects and functions to be used for the ellipses and titles in the graph. 
+
+```{r}
+#create NMDS.mean to use for graph titles later, takes nmds scores plus variable that you want for ellipses cluster
+NMDS.mean=aggregate(data.scores[,1:2],list(group=data.scores$island),mean)
+
+#This function below is the equivalent of the vegan function ordiellipse (from the PCoA code)
+#Data frame df_ell contains values to show ellipses. 
+#It is calculated with function veganCovEllipse which is hidden in vegan package. 
+#This function is applied to each level of NMDS (island) and it uses also function cov.wt to calculate covariance matrix.
+
+veganCovEllipse<-function (cov, center = c(0, 0), scale = 1, npoints = 100) 
+{
+  theta <- (0:npoints) * 2 * pi/npoints
+  Circle <- cbind(cos(theta), sin(theta))
+  t(center + scale * t(Circle %*% chol(cov)))
+}
+
+df_ell <- data.frame()
+for(g in levels(data.scores$island)){
+  df_ell <- rbind(df_ell, cbind(as.data.frame(with(data.scores[data.scores$island==g,],
+                                                   veganCovEllipse(cov.wt(cbind(NMDS1,NMDS2),wt=rep(1/length(NMDS1),length(NMDS1)))$cov,center=c(mean(NMDS1),mean(NMDS2)))))
+                                ,group=g))
+}
+
+
+```
+
+Now we can plot the data
+```{r}
+ggplot(data.scores, aes(NMDS1, NMDS2))+
+  geom_point(data=data.scores,aes(x=NMDS1,y=NMDS2,shape=species,colour=grp)) +
+  geom_polygon(data=df_ell, aes(x=NMDS1, y=NMDS2, fill=group), size=1, alpha=1/2)+ 
+  annotate("text",x=NMDS.mean$NMDS1,y=NMDS.mean$NMDS2,label=NMDS.mean$group)+#gives titles to each cluster
+  labs(title="NMDS Jaccard")+
+  labs(color="site")+theme_bw()+
+  theme(legend.key.size = unit(.3, "cm"), panel.grid.major=element_blank(), panel.grid.minor=element_blank()) #removes background grid
+```
+
+The plots for Bray-Curtis and Jaccard look similar because the Jaccard dissimilarity index is calculated using the results from Bray-Curtis. However, because Bray-Curtis is only semimetric, most similar analyses in the literature use Jaccard.
+
+Conclusion 
+
+When looking at the island NMDS and PCoA, we see that for the PCoA and Euclidean NMDS Acropora alleles at Palau and Ngulu are different from the rest of the islands. The Jaccard and Bray-Curtis analyses show a similar pattern to the Euclidean analysis and PCoA with Ngulu and Palau except that their location on the graphs are switched (likely due to differences between distances and disimilarity indices). Because Palau and Ngulu populations are genetically divergent from the other islands and eachother, future analyses might focus on determining reasons for genetic divergence, such as environmental variability. Because species were also different using the PCoA, it might also be useful to perform a (sort of) multivariate NMDS creating dissimilarity indices for species within islands.This would help us determine if physical space is more important in determining genetic differences within these two species than actual species deliniation.
