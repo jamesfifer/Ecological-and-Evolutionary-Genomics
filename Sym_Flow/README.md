@@ -12,7 +12,7 @@ Filter out contigs with <300bp using the 300bpfilter.sh & contigs_to_fasta.py
 4) Use mapping.sh to generate counts file via RSEM. Take "raw counts" from RSEM gene file. 
 
 # Annotation 
-1) Use the pipeline outlined in 
+1) Use the pipeline outlined in Annotation.sh
 
 # DESeq and analysis
 1) Use SymFlow.rmd file to run deseq2 and downstream analyses
