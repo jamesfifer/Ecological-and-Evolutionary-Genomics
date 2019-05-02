@@ -1,0 +1,1325 @@
+---
+title: "Sym_Flow"
+author: "James Fifer, Konstantinos Kontodimas"
+date: "May 1, 2019"
+output: html_document
+---
+### Exploring how flow modulates the gene expression of Symbiodiniaceae under heat stress
+
+Introduction: 
+High-flow provides corals with a variety of health benefits, including heat stress mitigation. Here, we investigate how water flow affects symbiont gene expression and provides resilience to warming temperatures. In addition, we conducted ex situ controlled tank experiments during which we exposed Acropora cf. pulchra to different flow regimes and acute heat stress. In Fifer et al. (in prep), gene expression of the host showed differences between each flow condition and differences between ambient and heated conditions. Gene expression of the symbionts hosted by A. cf. pulchra (Cladocopium in this study) was examined under each condition in this project. We show a different clustering pattern for symbionts where symbionts show still show differential expression when heat stressed, but only under low flow conditions. 
+
+Version Control:
+R version 3.5.1 (2018-07-02)
+DESeq_1.34.1
+affycoretools_1.54.0
+arrayQualityMetrics_3.38.0
+genefilter_1.64.0 
+ggplot2_3.1.1  
+Biobase_2.42.0 
+pheatmap_1.0.12
+vegan_2.5-4  
+rgl_0.100.19 
+ape_5.3
+VennDiagram_1.6.20  
+dplyr_0.8.0.1
+DESeq2_1.22.2
+ggrepel_0.8.0
+tidyverse_1.2.1
+
+
+Loading packages for outlier detection
+```{r}
+library(DESeq) 
+library(affycoretools)
+library(arrayQualityMetrics)
+library(genefilter)
+library(knitr)
+```
+
+```{r}
+countData <- read.table("SymCounts.csv")
+head(countData)
+length(countData[,1])
+#22495
+row.names(countData)=sub("", "isogroup", rownames(countData))
+head(countData)
+
+treat=c( "Cond_A", "Cond_A", "Cond_A" , "Cond_A", "Cond_B","Cond_B", "Cond_B", "Cond_B", "Cond_C","Cond_C","Cond_C","Cond_C","Cond_D","Cond_D","Cond_D")
+
+conditions=data.frame(treat)
+nrow(conditions) 
+ncol(countData)
+m <- as.matrix(countData)
+storage.mode(m) = "integer"
+head(m)
+
+real=newCountDataSet(m,conditions) 
+real=estimateSizeFactors(real)
+plot(sort(sizeFactors(real))) 
+
+cds=estimateDispersions(real,method="blind")
+vsdBlind=varianceStabilizingTransformation(cds)
+#Uncomment the below code to save arrayqualitymetrics to your directory
+#v=setwd("C:/Users/james/Documents/BOSTON/Ecological & evolutionary genomics/Final_Project")
+#arrayQualityMetrics(vsdBlind,outdir=v,intgroup=c("treat"), force=TRUE)
+```
+B2 Looks like it could be an outlier, but it doesn't show up as an outlier for any other test so we kept it. 
+```{r pressure3, echo=FALSE, fig.cap="Outlier test", out.width = '100%'}
+knitr::include_graphics("out hm.png")
+```
+
+
+Loading packages for deseq2
+```{r}
+detach("package:DESeq", unload=TRUE)
+library(ggplot2)
+library(Biobase)
+library(pheatmap)
+library(vegan)
+library(rgl)
+library(ape)
+library(VennDiagram)
+library(dplyr)
+library(DESeq2) 
+library(pheatmap)
+library(ggrepel)
+library(tidyverse)
+```
+
+
+First we read in the counts and define the conditions 
+
+```{r setup, include=FALSE}
+#read in counts 
+countData <- read.table("SymCounts.csv")
+m <- as.matrix(countData)
+#Even though we took the raw reads there were still some decimals, we rounded these using the integer function but the package tximport also offers a method of obtaining whole numbers from raw RSEM reads- this package also takes into consideration transcript length. 
+storage.mode(m) = "integer"
+head(m)
+
+
+
+# making a table of experimental conditions:
+# A,B,C,D - conditions of ex situ experiment 
+# a,b,c,d -  different original high flow colonies
+treat=c( "Cond_A", "Cond_A", "Cond_A" , "Cond_A", "Cond_B","Cond_B", "Cond_B", "Cond_B", "Cond_C","Cond_C","Cond_C","Cond_C","Cond_D","Cond_D","Cond_D")
+colony=as.factor (c( "Col_b", "Col_a", "Col_c", "Col_d", "Col_a","Col_b", "Col_c", "Col_d", "Col_b","Col_a","Col_c","Col_d","Col_b","Col_a","Col_c"))
+g=data.frame(treat, colony)
+g
+colData<- g
+#CountData means was changed based on MATPlots, filter wasn't catching all outliers. 
+#countData=counts[means>=3, ]
+nrow(countData)
+```
+
+We then used deseq2 to find differentially expressed genes. While the below code is set to examine only the effect of treatment the commented out parts are for when we ran deseq "colony" as an additional factor, in an attempt to control for genotype. 
+```{r}
+
+#To run and only examine the effect of treatment we did:
+dds<-DESeq2::DESeqDataSetFromMatrix(countData=m, colData=colData, design=~treat)
+
+#We also ran deseq2 with the effect of colony (genotype)
+#dds<-DESeqDataSetFromMatrix(countData=m, colData=colData, design=~treat+colony) 
+
+
+
+#one step DESeq
+dds<-DESeq(dds)
+# estimating size factors
+# estimating dispersions
+# gene-wise dispersion estimates
+# mean-dispersion relationship
+# final dispersion estimates
+# fitting model and testing
+
+res<- results(dds)
+head(res)
+#Look at dispersions plot
+plotDispEsts(dds, main="Dispersion plot ")
+```
+
+
+We then looked accross all four comparisons High Flow + Heat (A), High Flow + No Heat (B), Low Flow + Heat (C), Low Flow + No Heat (D). To see how many differentially expressed genes there were. We also generated files for the GO_MWU analysis. 
+```{r}
+####################################################################################################
+############################# A Comparisons  #######################################################
+#################### A vs B 
+colData$AvsB<-factor(colData$treat, levels=c("Cond_A","Cond_B"))
+##second term is the "control"
+resAvsB <- results(dds, contrast=c("treat","Cond_A","Cond_B"))
+#how many FDR < 10%?
+table(resAvsB$padj<0.1)
+table(resAvsB$padj<0.05)
+table(resAvsB$padj<0.01)
+# 0.1=0
+# 0.05=0
+# 0.01=0
+summary(resAvsB)
+
+nrow(resAvsB[resAvsB$padj<0.05 & !is.na(resAvsB$padj),])  # Num significantly differentially expressed genes excluding the no/low count genes   #228
+
+plotMA(resAvsB, main="Cond_A vs Cond_B")
+plotMA(resAvsB, main="Cond_A vs Cond_B + y-lim", ylim=c(-2,2))
+
+results <- as.data.frame(resAvsB)
+head(results)
+
+nrow(resAvsB[resAvsB$padj<0.1 & resAvsB$log2FoldChange > 0 & !is.na(resAvsB$padj),])
+nrow(resAvsB[resAvsB$padj<0.1 & resAvsB$log2FoldChange < 0 & !is.na(resAvsB$padj),])
+#UP in A = 0
+#DOWN in A = 0
+
+write.table(resAvsB, file="AvsB.txt", quote=F, sep="\t")
+
+cd <- read.table("AvsB.txt")
+
+head(cd)
+
+MAttPlot <- function(df) {
+  df$dotcol <- ifelse(df$log2FoldChange > 0 & df$padj < 0.1, 'darkorange',
+                      ifelse(df$log2FoldChange < 0 & df$padj < 0.1, 'cyan3', 'black'))
+  df$baseMean <- log2(df$baseMean)
+  print(head(df))
+  gg <- ggplot(df, aes(baseMean, log2FoldChange)) +
+    geom_point(size = .3, color = df$dotcol) +
+    theme_bw() +
+    theme(panel.grid = element_blank())
+  print(gg)
+}
+
+MAttPlot(cd)
+
+#################### A vs C
+colData$AvsC<-factor(colData$treat, levels=c("Cond_A","Cond_C"))
+##second term is the "control"
+resAvsC <- results(dds, contrast=c("treat","Cond_A","Cond_C"))
+#how many FDR < 10%?
+table(resAvsC$padj<0.1)
+table(resAvsC$padj<0.05)
+table(resAvsC$padj<0.01)
+# 0.1= 71
+# 0.05=68
+# 0.01=57
+summary(resAvsC)
+
+nrow(resAvsC[resAvsC$padj<0.05 & !is.na(resAvsC$padj),])  # Num significantly differentially expressed genes excluding the no/low count genes   #228
+
+plotMA(resAvsC, main="Cond_A vs Cond_C")
+plotMA(resAvsC, main="Cond_A vs Cond_C + y-lim", ylim=c(-2,2))
+
+results <- as.data.frame(resAvsC)
+head(results)
+
+nrow(resAvsC[resAvsC$padj<0.1 & resAvsC$log2FoldChange > 0 & !is.na(resAvsC$padj),])
+nrow(resAvsC[resAvsC$padj<0.1 & resAvsC$log2FoldChange < 0 & !is.na(resAvsC$padj),])
+#UP in A=71
+#DOWN in A=0 
+
+write.table(resAvsB, file="AvsC.txt", quote=F, sep="\t")
+
+cd <- read.table("AvsC.txt")
+##Delete outliers log2fold >10##
+cd<-cd[!rowSums(cd[2] >10),]
+head(cd)
+MAttPlot(cd)
+
+
+##########make the GO table for MWU
+head(cd)
+cd$isogroup=row.names(cd)
+library(dplyr)
+go_input_AvsC = cd %>%
+  mutate(mutated_p = -log(pvalue)) %>%
+  mutate(mutated_p_updown = ifelse(log2FoldChange < 0, mutated_p*-1, mutated_p*1)) %>%
+  select(isogroup, mutated_p_updown) %>%
+  na.omit()
+
+nrow(go_input_AvsC)
+head(go_input_AvsC)
+nrow(go_input_AvsC)
+colnames(go_input_AvsC) <- c("gene", "pval")
+head(go_input_AvsC)
+write.csv(go_input_AvsC, file="AvsC_GO.csv", quote=F, row.names=FALSE)
+
+
+#################### A vs D  
+colData$AvsD<-factor(colData$treat, levels=c("Cond_A","Cond_D"))
+##second term is the "control"
+resAvsD <- results(dds, contrast=c("treat","Cond_A","Cond_D"))
+#how many FDR < 10%?
+table(resAvsD$padj<0.1)
+table(resAvsD$padj<0.05)
+table(resAvsD$padj<0.01)
+# 0.1= 1116
+# 0.05=767
+# 0.01=375
+summary(resAvsD)
+
+nrow(resAvsD[resAvsD$padj<0.05 & !is.na(resAvsD$padj),])  # Num significantly differentially expressed genes excluding the no/low count genes   #228
+#898
+
+plotMA(resAvsD, main="Cond_A vs Cond_D")
+plotMA(resAvsD, main="Cond_A vs Cond_D + y-lim", ylim=c(-2,2))
+
+results <- as.data.frame(resAvsD)
+head(results)
+
+nrow(resAvsD[resAvsD$padj<0.1 & resAvsD$log2FoldChange > 0 & !is.na(resAvsD$padj),])
+nrow(resAvsD[resAvsD$padj<0.1 & resAvsD$log2FoldChange < 0 & !is.na(resAvsD$padj),])
+#UP in A 1059
+#DOWN in A 57
+
+write.table(resAvsD, file="AvsD.txt", quote=F, sep="\t")
+
+cd <- read.table("AvsD.txt")
+##Delete outliers log2fold >10##
+cd<-cd[!rowSums(cd[2] >10),]
+head(cd)
+MAttPlot(cd)
+
+
+##########make the GO table for MWU
+head(cd)
+cd$isogroup=row.names(cd)
+library(dplyr)
+go_input_AvsD = cd %>%
+  mutate(mutated_p = -log(pvalue)) %>%
+  mutate(mutated_p_updown = ifelse(log2FoldChange < 0, mutated_p*-1, mutated_p*1)) %>%
+  select(isogroup, mutated_p_updown) %>%
+  na.omit()
+
+nrow(go_input_AvsD)
+head(go_input_AvsD)
+nrow(go_input_AvsD)
+colnames(go_input_AvsD) <- c("gene", "pval")
+head(go_input_AvsD)
+write.csv(go_input_AvsD, file="AvsD_GO.csv", quote=F, row.names=FALSE)
+
+
+####################################################################################################
+############################# B Comparisons  #######################################################
+
+#################### B vs A 
+colData$BvsA<-factor(colData$treat, levels=c("Cond_B","Cond_A"))
+##second term is the "control"
+resBvsA <- results(dds, contrast=c("treat","Cond_B","Cond_A"))
+#how many FDR < 10%?
+table(resBvsA$padj<0.1)
+table(resBvsA$padj<0.05)
+table(resBvsA$padj<0.01)
+# 0.1=0
+# 0.05=0
+# 0.01=0
+summary(resBvsA)
+
+nrow(resBvsA[resBvsA$padj<0.05 & !is.na(resBvsA$padj),])  # Num significantly differentially expressed genes excluding the no/low count genes   #228
+
+plotMA(resBvsA, main="Cond_B vs Cond_A")
+plotMA(resBvsA, main="Cond_B vs Cond_A + y-lim", ylim=c(-2,2))
+
+results <- as.data.frame(resBvsA)
+head(results)
+
+nrow(resBvsA[resBvsA$padj<0.1 & resBvsA$log2FoldChange > 0 & !is.na(resBvsA$padj),])
+nrow(resBvsA[resBvsA$padj<0.1 & resBvsA$log2FoldChange < 0 & !is.na(resBvsA$padj),])
+#UP in B = 0
+#DOWN in B = 0
+
+write.table(resBvsA, file="BvsA.txt", quote=F, sep="\t")
+
+cd <- read.table("BvsA.txt")
+##Delete outliers log2fold >10##
+cd<-cd[!rowSums(cd[2] >10),]
+head(cd)
+MAttPlot(cd)
+
+
+##########make the GO table for MWU
+head(cd)
+cd$isogroup=row.names(cd)
+library(dplyr)
+go_input_BvsA = cd %>%
+  mutate(mutated_p = -log(pvalue)) %>%
+  mutate(mutated_p_updown = ifelse(log2FoldChange < 0, mutated_p*-1, mutated_p*1)) %>%
+  select(isogroup, mutated_p_updown) %>%
+  na.omit()
+
+nrow(go_input_BvsA)
+head(go_input_BvsA)
+nrow(go_input_BvsA)
+colnames(go_input_BvsA) <- c("gene", "pval")
+head(go_input_BvsA)
+write.csv(go_input_BvsA, file="BvsA_GO.csv", quote=F, row.names=FALSE)
+
+#################### B vs C 
+colData$BvsC<-factor(colData$treat, levels=c("Cond_B","Cond_C"))
+##second term is the "control"
+resBvsC <- results(dds, contrast=c("treat","Cond_B","Cond_C"))
+#how many FDR < 10%?
+table(resBvsC$padj<0.1)
+table(resBvsC$padj<0.05)
+table(resBvsC$padj<0.01)
+# 0.1= 73
+# 0.05=69
+# 0.01=59
+summary(resBvsC)
+
+nrow(resBvsC[resBvsC$padj<0.05 & !is.na(resBvsC$padj),])  # Num significantly differentially expressed genes excluding the no/low count genes   #228
+
+plotMA(resBvsC, main="Cond_B vs Cond_C")
+plotMA(resBvsC, main="Cond_B vs Cond_C + y-lim", ylim=c(-30,30))
+
+results <- as.data.frame(resBvsC)
+head(results)
+
+nrow(resBvsC[resBvsC$padj<0.1 & resBvsC$log2FoldChange > 0 & !is.na(resBvsC$padj),])
+nrow(resBvsC[resBvsC$padj<0.1 & resBvsC$log2FoldChange < 0 & !is.na(resBvsC$padj),])
+#UP in B =69
+#DOWN in B =0
+
+
+
+write.table(resBvsC, file="BvsC.txt", quote=F, sep="\t")
+
+cd <- read.table("BvsC.txt")
+###Removed outlier points (log2foldchange >10 )
+cd<-cd[!rowSums(cd[2] >10),]
+
+head(cd)
+
+
+
+
+##########make the GO table for MWU
+head(cd)
+cd$isogroup=row.names(cd)
+library(dplyr)
+go_input_BvsC = cd %>%
+  mutate(mutated_p = -log(pvalue)) %>%
+  mutate(mutated_p_updown = ifelse(log2FoldChange < 0, mutated_p*-1, mutated_p*1)) %>%
+  select(isogroup, mutated_p_updown) %>%
+  na.omit()
+
+nrow(go_input_BvsC)
+head(go_input_BvsC)
+nrow(go_input_BvsC)
+colnames(go_input_BvsC) <- c("gene", "pval")
+head(go_input_BvsC)
+write.csv(go_input_BvsC, file="BvsC_GO.csv", quote=F, row.names=FALSE)
+
+#################### B vs D 
+colData$BvsD<-factor(colData$treat, levels=c("Cond_B","Cond_D"))
+##second term is the "control"
+resBvsD <- results(dds, contrast=c("treat","Cond_B","Cond_D"))
+#how many FDR < 10%?
+table(resBvsD$padj<0.1)
+table(resBvsD$padj<0.05)
+table(resBvsD$padj<0.01)
+# 0.1= 1886
+# 0.05=1009
+# 0.01=187
+summary(resBvsD)
+
+nrow(resBvsD[resBvsD$padj<0.05 & !is.na(resBvsD$padj),])  # Num significantly differentially expressed genes excluding the no/low count genes   
+#1513
+
+plotMA(resBvsD, main="Cond_B vs Cond_D")
+plotMA(resBvsD, main="Cond_B vs Cond_D + y-lim", ylim=c(-30,30))
+
+results <- as.data.frame(resBvsD)
+head(results)
+
+nrow(resBvsD[resBvsD$padj<0.1 & resBvsD$log2FoldChange > 0 & !is.na(resBvsD$padj),])
+nrow(resBvsD[resBvsD$padj<0.1 & resBvsD$log2FoldChange < 0 & !is.na(resBvsD$padj),])
+#UP in B 1669
+#DOWN in B 217
+
+write.table(resBvsD, file="BvsD.txt", quote=F, sep="\t")
+##Delete outliers log2fold >10##
+cd<-cd[!rowSums(cd[2] >10),]
+cd <- read.table("BvsD.txt")
+head(cd)
+
+MAttPlot(cd)
+
+
+##########make the GO table for MWU
+head(cd)
+cd$isogroup=row.names(cd)
+library(dplyr)
+go_input_BvsD = cd %>%
+  mutate(mutated_p = -log(pvalue)) %>%
+  mutate(mutated_p_updown = ifelse(log2FoldChange < 0, mutated_p*-1, mutated_p*1)) %>%
+  select(isogroup, mutated_p_updown) %>%
+  na.omit()
+
+nrow(go_input_BvsD)
+head(go_input_BvsD)
+nrow(go_input_BvsD)
+colnames(go_input_BvsD) <- c("gene", "pval")
+head(go_input_BvsD)
+write.csv(go_input_BvsD, file="BvsD_GO.csv", quote=F, row.names=FALSE)
+
+
+####################################################################################################
+############################# C Comparisons  #######################################################
+
+#################### C vs A   
+colData$CvsA<-factor(colData$treat, levels=c("Cond_C","Cond_A"))
+##second term is the "control"
+resCvsA <- results(dds, contrast=c("treat","Cond_C","Cond_A"))
+#how many FDR < 10%?
+table(resCvsA$padj<0.1)
+table(resCvsA$padj<0.05)
+table(resCvsA$padj<0.01)
+# 0.1= 71
+# 0.05= 68
+# 0.01= 57
+summary(resCvsA)
+
+nrow(resCvsA[resCvsA$padj<0.05 & !is.na(resCvsA$padj),])  # Num significantly differentially expressed genes excluding the no/low count genes   #228
+#0
+
+plotMA(resCvsA, main="Cond_C vs Cond_A")
+plotMA(resCvsA, main="Cond_C vs Cond_A + y-lim", ylim=c(-2,2))
+
+results <- as.data.frame(resCvsA)
+head(results)
+
+nrow(resCvsA[resCvsA$padj<0.1 & resCvsA$log2FoldChange > 0 & !is.na(resCvsA$padj),])
+nrow(resCvsA[resCvsA$padj<0.1 & resCvsA$log2FoldChange < 0 & !is.na(resCvsA$padj),])
+#UP in C 0
+#DOWN in C 71 
+
+write.table(resCvsA, file="CvsA.txt", quote=F, sep="\t")
+
+cd <- read.table("CvsA.txt")
+head(cd)
+##Delete outliers log2fold >10##
+cd<-cd[!rowSums(cd[2] >10),]
+MAttPlot(cd)
+
+##########make the GO table for MWU
+head(cd)
+cd$isogroup=row.names(cd)
+library(dplyr)
+go_input_CvsA = cd %>%
+  mutate(mutated_p = -log(pvalue)) %>%
+  mutate(mutated_p_updown = ifelse(log2FoldChange < 0, mutated_p*-1, mutated_p*1)) %>%
+  select(isogroup, mutated_p_updown) %>%
+  na.omit()
+
+nrow(go_input_CvsA)
+head(go_input_CvsA)
+nrow(go_input_CvsA)
+colnames(go_input_CvsA) <- c("gene", "pval")
+head(go_input_CvsA)
+write.csv(go_input_CvsA, file="CvsA_GO.csv", quote=F, row.names=FALSE)
+
+
+#################### C vs B 
+colData$CvsB<-factor(colData$treat, levels=c("Cond_C","Cond_B"))
+##second term is the "control"
+resCvsB <- results(dds, contrast=c("treat","Cond_C","Cond_B"))
+#how many FDR < 10%?
+table(resCvsB$padj<0.1)
+table(resCvsB$padj<0.05)
+table(resCvsB$padj<0.01)
+# 0.1= 73
+# 0.05=69
+# 0.01=59
+summary(resCvsB)
+
+nrow(resCvsB[resCvsB$padj<0.05 & !is.na(resCvsB$padj),])  # Num significantly differentially expressed genes excluding the no/low count genes   #228
+#1
+
+plotMA(resCvsB, main="Cond_C vs Cond_B")
+plotMA(resCvsB, main="Cond_C vs Cond_B + y-lim", ylim=c(-2,2))
+
+results <- as.data.frame(resCvsB)
+head(results)
+
+nrow(resCvsB[resCvsB$padj<0.1 & resCvsB$log2FoldChange > 0 & !is.na(resCvsB$padj),])
+nrow(resCvsB[resCvsB$padj<0.1 & resCvsB$log2FoldChange < 0 & !is.na(resCvsB$padj),])
+#UP in C 0
+#DOWN in C 73 
+
+write.table(resCvsB, file="CvsB.txt", quote=F, sep="\t")
+
+cd <- read.table("CvsB.txt")
+head(cd)
+##Delete outliers log2fold >10##
+cd<-cd[!rowSums(cd[2] >10),]
+
+MAttPlot(cd)
+
+##########make the GO table for MWU
+head(cd)
+cd$isogroup=row.names(cd)
+library(dplyr)
+go_input_CvsB = cd %>%
+  mutate(mutated_p = -log(pvalue)) %>%
+  mutate(mutated_p_updown = ifelse(log2FoldChange < 0, mutated_p*-1, mutated_p*1)) %>%
+  select(isogroup, mutated_p_updown) %>%
+  na.omit()
+
+nrow(go_input_CvsB)
+head(go_input_CvsB)
+nrow(go_input_CvsB)
+colnames(go_input_CvsB) <- c("gene", "pval")
+head(go_input_CvsB)
+write.csv(go_input_CvsB, file="CvsB_GO.csv", quote=F, row.names=FALSE)
+
+
+#################### C vs D   
+colData$CvsD<-factor(colData$treat, levels=c("Cond_C","Cond_D"))
+##second term is the "control"
+resCvsD <- results(dds, contrast=c("treat","Cond_C","Cond_D"))
+#how many FDR < 10%?
+table(resCvsD$padj<0.1)
+table(resCvsD$padj<0.05)
+table(resCvsD$padj<0.01)
+# 0.1= 682
+# 0.05=564
+# 0.01=369
+summary(resCvsD)
+
+nrow(resCvsD[resCvsD$padj<0.05 & !is.na(resCvsD$padj),])  # Num significantly differentially expressed genes excluding the no/low count genes   #228
+#530
+
+plotMA(resCvsD, main="Cond_C vs Cond_D")
+plotMA(resCvsD, main="Cond_C vs Cond_D + y-lim", ylim=c(-30,30))
+
+results <- as.data.frame(resCvsD)
+head(results)
+
+nrow(resCvsD[resCvsD$padj<0.1 & resCvsD$log2FoldChange > 0 & !is.na(resCvsD$padj),])
+nrow(resCvsD[resCvsD$padj<0.1 & resCvsD$log2FoldChange < 0 & !is.na(resCvsD$padj),])
+#UP in C 649
+#DOWN in C 33
+
+write.table(resCvsD, file="CvsD.txt", quote=F, sep="\t")
+
+cd <- read.table("CvsD.txt")
+##Delete outliers log2fold >10##
+#Also outliers needed to be deleted that were less than -10 fold for this particular comparison
+cd<-cd[!rowSums(cd[2] >10),]
+cd<-cd[!rowSums(cd[2] <c(-10)),]
+head(cd)
+
+MAttPlot(cd)
+
+
+##########make the GO table for MWU
+head(cd)
+cd$isogroup=row.names(cd)
+library(dplyr)
+go_input_CvsD = cd %>%
+  mutate(mutated_p = -log(pvalue)) %>%
+  mutate(mutated_p_updown = ifelse(log2FoldChange < 0, mutated_p*-1, mutated_p*1)) %>%
+  select(isogroup, mutated_p_updown) %>%
+  na.omit()
+
+nrow(go_input_CvsD)
+head(go_input_CvsD)
+nrow(go_input_CvsD)
+colnames(go_input_CvsD) <- c("gene", "pval")
+head(go_input_CvsD)
+write.csv(go_input_CvsD, file="CvsD_GO.csv", quote=F, row.names=FALSE)
+
+
+####################################################################################################
+############################# D Comparisons  #######################################################
+
+#################### D vs A 
+colData$DvsA<-factor(colData$treat, levels=c("Cond_D","Cond_A"))
+##second term is the "control"
+resDvsA <- results(dds, contrast=c("treat","Cond_D","Cond_A"))
+#how many FDR < 10%?
+table(resDvsA$padj<0.1)
+table(resDvsA$padj<0.05)
+table(resDvsA$padj<0.01)
+# 0.1=1116
+# 0.05=767
+# 0.01=375
+summary(resDvsA)
+
+nrow(resDvsA[resDvsA$padj<0.05 & !is.na(resDvsA$padj),])  # Num significantly differentially expressed genes excluding the no/low count genes   #228
+#898
+
+plotMA(resDvsA, main="Cond_D vs Cond_A")
+plotMA(resDvsA, main="Cond_D vs Cond_A + y-lim", ylim=c(-30,30))
+
+results <- as.data.frame(resDvsA)
+head(results)
+
+nrow(resDvsA[resDvsA$padj<0.1 & resDvsA$log2FoldChange > 0 & !is.na(resDvsA$padj),])
+nrow(resDvsA[resDvsA$padj<0.1 & resDvsA$log2FoldChange < 0 & !is.na(resDvsA$padj),])
+#UP in D = 57
+#DOWN in D = 1059
+
+write.table(resDvsA, file="DvsA.txt", quote=F, sep="\t")
+
+cd <- read.table("DvsA.txt")
+##Delete outliers log2fold >10##
+cd<-cd[!rowSums(cd[2] >10),]
+head(cd)
+MAttPlot(cd)
+
+
+##########make the GO table for MWU
+head(cd)
+cd$isogroup=row.names(cd)
+library(dplyr)
+go_input_DvsA = cd %>%
+  mutate(mutated_p = -log(pvalue)) %>%
+  mutate(mutated_p_updown = ifelse(log2FoldChange < 0, mutated_p*-1, mutated_p*1)) %>%
+  select(isogroup, mutated_p_updown) %>%
+  na.omit()
+
+nrow(go_input_DvsA)
+head(go_input_DvsA)
+nrow(go_input_DvsA)
+colnames(go_input_DvsA) <- c("gene", "pval")
+head(go_input_DvsA)
+write.csv(go_input_DvsA, file="DvsA_GO.csv", quote=F, row.names=FALSE)
+
+#################### D vs B 
+colData$DvsB<-factor(colData$treat, levels=c("Cond_D","Cond_B"))
+##second term is the "control"
+resDvsB <- results(dds, contrast=c("treat","Cond_D","Cond_B"))
+#how many FDR < 10%?
+table(resDvsB$padj<0.1)
+table(resDvsB$padj<0.05)
+table(resDvsB$padj<0.01)
+# 0.1=1886
+# 0.05=1009
+# 0.01=187
+summary(resDvsB)
+
+nrow(resDvsB[resDvsB$padj<0.05 & !is.na(resDvsB$padj),])  # Num significantly differentially expressed genes excluding the no/low count genes   #228
+
+plotMA(resDvsB, main="Cond_D vs Cond_B")
+plotMA(resDvsB, main="Cond_D vs Cond_B + y-lim", ylim=c(-30,30))
+
+results <- as.data.frame(resDvsB)
+head(results)
+
+nrow(resAvsB[resDvsB$padj<0.1 & resDvsB$log2FoldChange > 0 & !is.na(resDvsB$padj),])
+nrow(resAvsB[resDvsB$padj<0.1 & resDvsB$log2FoldChange < 0 & !is.na(resDvsB$padj),])
+#UP in D = 217
+#DOWN in D = 1669
+
+write.table(resDvsB, file="DvsB.txt", quote=F, sep="\t")
+
+cd <- read.table("DvsB.txt")
+##Delete outliers log2fold >10##
+cd<-cd[!rowSums(cd[2] >10),]
+head(cd)
+
+MAttPlot(cd)
+
+##########make the GO table for MWU
+head(cd)
+cd$isogroup=row.names(cd)
+library(dplyr)
+go_input_DvsB = cd %>%
+  mutate(mutated_p = -log(pvalue)) %>%
+  mutate(mutated_p_updown = ifelse(log2FoldChange < 0, mutated_p*-1, mutated_p*1)) %>%
+  select(isogroup, mutated_p_updown) %>%
+  na.omit()
+
+nrow(go_input_DvsB)
+head(go_input_DvsB)
+nrow(go_input_DvsB)
+colnames(go_input_DvsB) <- c("gene", "pval")
+head(go_input_DvsB)
+write.csv(go_input_DvsB, file="DvsB_GO.csv", quote=F, row.names=FALSE)
+
+
+#################### D vs C 
+colData$DvsC<-factor(colData$treat, levels=c("Cond_D","Cond_C"))
+##second term is the "control"
+resDvsC <- results(dds, contrast=c("treat","Cond_D","Cond_C"))
+#how many FDR < 10%?
+table(resDvsC$padj<0.1)
+table(resDvsC$padj<0.05)
+table(resDvsC$padj<0.01)
+# 0.1= 682
+# 0.05= 564
+# 0.01=369
+summary(resDvsC)
+
+nrow(resDvsC[resDvsC$padj<0.05 & !is.na(resDvsC$padj),])  # Num significantly differentially expressed genes excluding the no/low count genes   #228
+
+plotMA(resDvsC, main="Cond_D vs Cond_C")
+plotMA(resDvsC, main="Cond_D vs Cond_C + y-lim", ylim=c(-30,30))
+
+results <- as.data.frame(resDvsC)
+head(results)
+
+nrow(resDvsC[resDvsC$padj<0.1 & resDvsC$log2FoldChange > 0 & !is.na(resDvsC$padj),])
+nrow(resDvsC[resDvsC$padj<0.1 & resDvsC$log2FoldChange < 0 & !is.na(resDvsC$padj),])
+#UP in D 33
+#DOWN in D 649
+
+write.table(resDvsC, file="DvsC.txt", quote=F, sep="\t")
+
+cd <- read.table("DvsC.txt")
+##Delete outliers log2fold >10##
+cd<-cd[!rowSums(cd[2] >10),]
+head(cd)
+
+MAttPlot(cd)
+
+
+##########make the GO table for MWU
+head(cd)
+cd$isogroup=row.names(cd)
+library(dplyr)
+go_input_DvsC = cd %>%
+  mutate(mutated_p = -log(pvalue)) %>%
+  mutate(mutated_p_updown = ifelse(log2FoldChange < 0, mutated_p*-1, mutated_p*1)) %>%
+  select(isogroup, mutated_p_updown) %>%
+  na.omit()
+
+nrow(go_input_DvsC)
+head(go_input_DvsC)
+nrow(go_input_DvsC)
+colnames(go_input_DvsC) <- c("gene", "pval")
+head(go_input_DvsC)
+write.csv(go_input_DvsC, file="DvsC_GO.csv", quote=F, row.names=FALSE)
+
+```
+Based on the resulting number of DEGs for each comparison, it looks like the only comparisons that are of interest for the GO analysis are High Flow + No Heat vs Low Flow + No heat and Low Flow + Heat vs Low Flow + No Heat. 
+
+We also generated venn diagrams for these comparisons
+
+To generate venn diagrams we first needed to extract p values and rlog transform them 
+```{r}
+
+###############################################################################################
+###############################################################################################
+###############################################################################################
+#--------------get pvals
+
+#A
+valAvsB=cbind(resAvsB$pvalue, resAvsB$padj)
+head(valAvsB)
+colnames(valAvsB)=c("Cond_A", "Cond_B")
+length(valAvsB[,1])
+table(complete.cases(valAvsB))
+valAvsC=cbind(resAvsC$pvalue, resAvsC$padj)
+head(valAvsC)
+colnames(valAvsC)=c("Cond_A", "Cond_C")
+length(valAvsC[,1])
+table(complete.cases(valAvsC))
+valAvsD=cbind(resAvsD$pvalue, resAvsD$padj)
+head(valAvsD)
+colnames(valAvsD)=c("Cond_A", "Cond_D")
+length(valAvsD[,1])
+table(complete.cases(valAvsD))
+
+#B
+valBvsA=cbind(resBvsA$pvalue, resBvsA$padj)
+head(valBvsA)
+colnames(valBvsA)=c("Cond_B", "Cond_A")
+length(valBvsA[,1])
+table(complete.cases(valBvsA))
+valBvsC=cbind(resBvsC$pvalue, resBvsC$padj)
+head(valBvsC)
+colnames(valBvsC)=c("Cond_B", "Cond_C")
+length(valBvsC[,1])
+table(complete.cases(valBvsC))
+valBvsD=cbind(resBvsD$pvalue, resBvsD$padj)
+head(valBvsD)
+colnames(valBvsD)=c("Cond_B", "Cond_D")
+length(valBvsD[,1])
+table(complete.cases(valBvsD))
+
+#C
+valCvsA=cbind(resCvsA$pvalue, resCvsA$padj)
+head(valCvsA)
+colnames(valCvsA)=c("Cond_C", "Cond_A")
+length(valCvsA[,1])
+table(complete.cases(valCvsA))
+valCvsB=cbind(resCvsB$pvalue, resCvsB$padj)
+head(valCvsB)
+colnames(valCvsB)=c("Cond_C", "Cond_B")
+length(valCvsB[,1])
+table(complete.cases(valCvsB))
+valCvsD=cbind(resCvsD$pvalue, resCvsD$padj)
+head(valCvsD)
+colnames(valCvsD)=c("Cond_C", "Cond_D")
+length(valCvsD[,1])
+table(complete.cases(valCvsD))
+
+#D
+valDvsA=cbind(resDvsA$pvalue, resDvsA$padj)
+head(valDvsA)
+colnames(valDvsA)=c("Cond_D", "Cond_A")
+length(valDvsA[,1])
+table(complete.cases(valDvsA))
+valDvsB=cbind(resDvsB$pvalue, resDvsB$padj)
+head(valDvsB)
+colnames(valDvsB)=c("Cond_D", "Cond_B")
+length(valDvsB[,1])
+table(complete.cases(valDvsB))
+valDvsC=cbind(resDvsC$pvalue, resDvsC$padj)
+head(valDvsC)
+colnames(valDvsC)=c("Cond_D", "Cond_C")
+length(valDvsC[,1])
+table(complete.cases(valDvsC))
+
+
+#################################################################################
+#################################################################################
+#################################################################################
+####### Make rlogdata and pvals table
+
+rlog=rlogTransformation(dds, blind=TRUE) 
+rld=assay(rlog)
+head(rld)
+colnames(rld)=paste(colData$treat)
+head(rld)
+length(rld[,1])
+
+rldpvals=cbind(rld,valAvsB, valAvsC, valAvsD, valBvsA, valBvsC, valBvsD,valCvsA,valCvsB,valCvsD,valDvsA,valDvsB,valDvsC)
+
+dim(rldpvals)
+# 
+table(complete.cases(rldpvals))
+# FALSE  TRUE 
+# 
+
+write.csv(rldpvals, "Total_Sym_Pvals.csv", quote=F)
+
+head(matrix(rld))
+hist(matrix(rld), main="rlogdata")
+colnames(rld)=paste(colData$treat)
+head(rld)
+
+
+```
+
+
+```{r}
+# VENN Diagrams
+
+########## 
+# First summarize all up/down regulated 
+#A
+A1_up=row.names(resAvsB[resAvsB$padj<0.1 & !is.na(resAvsB$padj) & resAvsB$log2FoldChange>0,])
+length(A1_up) #0
+A1_down=row.names(resAvsB[resAvsB$padj<0.1 & !is.na(resAvsB$padj) & resAvsB$log2FoldChange<0,])
+length(A1_down) #0
+A2_up=row.names(resAvsC[resAvsC$padj<0.1 & !is.na(resAvsC$padj) & resAvsC$log2FoldChange>0,])
+length(A2_up) #1
+A2_down=row.names(resAvsC[resAvsC$padj<0.1 & !is.na(resAvsC$padj) & resAvsC$log2FoldChange<0,])
+length(A2_down) #0
+A3_up=row.names(resAvsD[resAvsD$padj<0.1 & !is.na(resAvsD$padj) & resAvsD$log2FoldChange>0,])
+length(A3_up) #
+A3_down=row.names(resAvsD[resAvsD$padj<0.1 & !is.na(resAvsD$padj) & resAvsD$log2FoldChange<0,])
+length(A3_down) #
+#All A
+A1=row.names(resAvsB[resAvsB$padj<0.1 & !is.na(resAvsB$padj),])
+A2=row.names(resBvsC[resBvsC$padj<0.1 & !is.na(resBvsC$padj),])
+A3=row.names(resBvsD[resBvsD$padj<0.1 & !is.na(resBvsD$padj),])
+#Up for A
+A12_up=union(A1_up,A2_up)
+A_up=union(A12_up,A3_up)
+length(A_up)
+#
+#Down for A
+A12_down=union(A1_down,A2_down)
+A_down=union(A12_down,A3_down)
+length(A_down)
+#
+#All for A
+A12=union(A1,A2)
+A=union(A12,A3)
+length(A)
+#
+
+#B
+B1_up=row.names(resBvsA[resBvsA$padj<0.1 & !is.na(resBvsA$padj) & resBvsA$log2FoldChange>0,])
+length(B1_up) #
+B1_down=row.names(resBvsA[resBvsA$padj<0.1 & !is.na(resBvsA$padj) & resBvsA$log2FoldChange<0,])
+length(B1_down) #
+B2_up=row.names(resBvsC[resBvsC$padj<0.1 & !is.na(resBvsC$padj) & resBvsC$log2FoldChange>0,])
+length(B2_up) #
+B2_down=row.names(resBvsC[resBvsC$padj<0.1 & !is.na(resBvsC$padj) & resBvsC$log2FoldChange<0,])
+length(B2_down) #
+B3_up=row.names(resBvsD[resBvsD$padj<0.1 & !is.na(resBvsD$padj) & resBvsD$log2FoldChange>0,])
+length(B3_up) #
+B3_down=row.names(resBvsD[resBvsD$padj<0.1 & !is.na(resBvsD$padj) & resBvsD$log2FoldChange<0,])
+length(B3_down) #
+#All B
+B1=row.names(resBvsA[resBvsA$padj<0.1 & !is.na(resBvsA$padj),])
+B2=row.names(resBvsC[resBvsC$padj<0.1 & !is.na(resBvsC$padj),])
+B3=row.names(resBvsD[resBvsD$padj<0.1 & !is.na(resBvsD$padj),])
+#Up for B
+B12_up=union(B1_up,B2_up)
+B_up=union(B12_up,B3_up)
+length(B_up)
+#
+#Down for B
+B12_down=union(B1_down,B2_down)
+B_down=union(B12_down,B3_down)
+length(B_down)
+#
+#All for B
+B12=union(B1,B2)
+B=union(B12,B3)
+length(B)
+#
+
+#C
+C1_up=row.names(resCvsA[resCvsA$padj<0.1 & !is.na(resCvsA$padj) & resCvsA$log2FoldChange>0,])
+length(C1_up) #
+C1_down=row.names(resCvsA[resCvsA$padj<0.1 & !is.na(resCvsA$padj) & resCvsA$log2FoldChange<0,])
+length(C1_down) #
+C2_up=row.names(resCvsB[resCvsB$padj<0.1 & !is.na(resCvsB$padj) & resCvsB$log2FoldChange>0,])
+length(C2_up) #
+C2_down=row.names(resCvsB[resCvsB$padj<0.1 & !is.na(resCvsB$padj) & resCvsB$log2FoldChange<0,])
+length(C2_down) #
+C3_up=row.names(resCvsD[resCvsD$padj<0.1 & !is.na(resCvsD$padj) & resCvsD$log2FoldChange>0,])
+length(C3_up) #
+C3_down=row.names(resCvsD[resCvsD$padj<0.1 & !is.na(resCvsD$padj) & resCvsD$log2FoldChange<0,])
+length(C3_down) #
+#All C
+C1=row.names(resCvsA[resCvsA$padj<0.1 & !is.na(resCvsA$padj),])
+C2=row.names(resBvsC[resBvsC$padj<0.1 & !is.na(resBvsC$padj),])
+C3=row.names(resCvsD[resCvsD$padj<0.1 & !is.na(resCvsD$padj),])
+#Up for C
+C12_up=union(C1_up,C2_up)
+C_up=union(C12_up,C3_up)
+length(C_up)
+#
+#Down for C
+C12_down=union(C1_down,C2_down)
+length(C12_down)
+C_down=union(C12_down,C3_down)
+length(C_down)
+#
+#All for C
+C12=union(C1,C2)
+length(C12)
+C=union(C12,C3)
+length(C)
+#
+
+#D
+D1_up=row.names(resDvsA[resDvsA$padj<0.1 & !is.na(resDvsA$padj) & resDvsA$log2FoldChange>0,])
+length(D1_up) #
+D1_down=row.names(resDvsA[resDvsA$padj<0.1 & !is.na(resDvsA$padj) & resDvsA$log2FoldChange<0,])
+length(D1_down) #
+D2_up=row.names(resDvsB[resDvsB$padj<0.1 & !is.na(resDvsB$padj) & resDvsB$log2FoldChange>0,])
+length(D2_up) #
+D2_down=row.names(resDvsB[resDvsB$padj<0.1 & !is.na(resDvsB$padj) & resDvsB$log2FoldChange<0,])
+length(D2_down) #
+D3_up=row.names(resDvsC[resDvsC$padj<0.1 & !is.na(resDvsC$padj) & resDvsC$log2FoldChange>0,])
+length(D3_up) #
+D3_down=row.names(resDvsC[resDvsC$padj<0.1 & !is.na(resDvsC$padj) & resDvsC$log2FoldChange<0,])
+length(D3_down) #
+#All D
+D1=row.names(resDvsA[resDvsA$padj<0.1 & !is.na(resDvsA$padj),])
+D2=row.names(resDvsB[resDvsB$padj<0.1 & !is.na(resDvsB$padj),])
+D3=row.names(resDvsC[resDvsC$padj<0.1 & !is.na(resDvsC$padj),])
+#Up for D
+D12_up=union(D1_up,D2_up)
+length(D12_up)
+D_up=union(D12_up,D3_up)
+length(D_up)
+#
+#Down for D
+D12_down=union(D1_down,D2_down)
+D_down=union(D12_down,D3_down)
+length(D_down)
+#
+#All for D
+D12=union(D1,D2)
+D=union(D12,D3)
+length(D)
+#
+
+##################
+##################
+#Now we can compare
+
+#All up
+candidates=list("A_up"=A_up, "B_up"=B_up, "C_up"=C_up,"D_up"=D_up)
+grid.newpage() #makes a new plotting space for the Venn Diagram to fit
+prettyvenn=venn.diagram(
+  x = candidates,
+  filename=NULL,
+  col = "transparent",
+  fill = c("purple", "yellow","orange","red"),
+  alpha = 0.5,
+  # label.col = c("darkred", "white", "darkgreen", "white", "white", "white", "blue4"),
+  cex = 2.5,
+  fontfamily = "sans",
+  fontface = "bold",
+  cat.default.pos = "text",
+  cat.col = c("darkred", "darkgreen","darkblue", "purple"),
+  cat.cex = 2.5,
+  cat.fontfamily = "sans",
+  cat.dist = c(0.08, 0.08, 0.08, 0.08),
+  cat.pos = 1
+);
+grid.draw(prettyvenn)
+
+#All down
+candidates=list("A_down"=A_down, "B_down"=B_down, "C_down"=C_down,"D_down"=D_down)
+grid.newpage() #makes a new plotting space for the Venn Diagram to fit
+prettyvenn=venn.diagram(
+  x = candidates,
+  filename=NULL,
+  col = "transparent",
+  fill = c("purple", "yellow","orange","red"),
+  alpha = 0.5,
+  # label.col = c("darkred", "white", "darkgreen", "white", "white", "white", "blue4"),
+  cex = 2.5,
+  fontfamily = "sans",
+  fontface = "bold",
+  cat.default.pos = "text",
+  cat.col = c("darkred", "darkgreen","darkblue", "purple"),
+  cat.cex = 2.5,
+  cat.fontfamily = "sans",
+  cat.dist = c(0.08, 0.08, 0.08, 0.08),
+  cat.pos = 1
+);
+grid.draw(prettyvenn)
+
+#All
+candidates=list("All_A"=A, "All_B"=B, "All_C"=C,"All_D"=D)
+grid.newpage() #makes a new plotting space for the Venn Diagram to fit
+prettyvenn=venn.diagram(
+  x = candidates,
+  filename=NULL,
+  col = "transparent",
+  fill = c("purple", "yellow","orange","red"),
+  alpha = 0.5,
+  # label.col = c("darkred", "white", "darkgreen", "white", "white", "white", "blue4"),
+  cex = 2.5,
+  fontfamily = "sans",
+  fontface = "bold",
+  cat.default.pos = "text",
+  cat.col = c("darkred", "darkgreen","darkblue", "purple"),
+  cat.cex = 2.5,
+  cat.fontfamily = "sans",
+  cat.dist = c(0.08, 0.08, 0.08, 0.08),
+  cat.pos = 1
+);
+grid.draw(prettyvenn)
+```
+
+Because there was no "control" in the experiment, our Venn Diagrams are a little unhelpful. However, it looks like condition D (Low Flow + No Heat) could be showing a different expression pattern from the rest. 
+We create a heatmap to explore this further
+
+```{r}
+rldpvals <- read.csv(file="Total_Sym_Pvals.csv", row.names=1)
+
+rld=rldpvals[,1:15]
+#head(rld)
+
+sampleDists <- dist(t(rld))
+sampleDistMatrix <- as.matrix(sampleDists)
+treat==c( "Cond_A", "Cond_A", "Cond_A" , "Cond_A", "Cond_B","Cond_B", "Cond_B", "Cond_B", "Cond_C","Cond_C","Cond_C","Cond_C","Cond_D","Cond_D","Cond_D")
+colnames(sampleDistMatrix)=paste(treat)
+rownames(sampleDistMatrix)=paste(treat)
+#Set colors and parameters
+heat.colors = colorRampPalette(rev(c("red","yellow","black")),bias=0.3)(100)
+pheatmap(sampleDistMatrix,color = heat.colors,cex=0.9,border_color=NA,cluster_rows=T,cluster_cols=T)
+
+```
+
+There looks to be little clustering according to treatment except for D (Low Flow + No Heat)
+
+We explored further with a PCA and a PCoA (this was only run to look for variance explained by treatment, not genotype).
+```{r}
+##########################################################
+#Principle Component Analysis
+rld_t=t(rld)
+which(apply(rld_t, 2, var)==0) #identify which columns have zero variance, PCA will not work on these
+rld_t = rld_t[ , apply(rld_t, 2, var) != 0] #removes columns with zero variance
+pca <- prcomp(rld_t,center = TRUE, scale. = TRUE, na.action = na.omit) #Scale = TRUE is advisable
+#head(pca)
+#Introduce principle components
+li <- pca$sdev^2 / sum(pca$sdev^2)
+pc1v <- round(li[1] * 100, 1)
+pc2v <- round(li[2] * 100, 1)
+pca_s <- as.data.frame(pca$x)
+#head(pca_s)
+pca_s <- pca_s[,c(1,2)]
+pca_s$Samples = row.names(pca_s)
+pca_s$treat=colData$treat
+pca_s$colony=colData$colony
+#head(pca_s)
+#Set parameters and components
+cbPalette <- c("red", "blue", "black", "purple")
+ggplot(pca_s, aes(PC1, PC2, color = treat, pch = colony)) +
+  geom_point(size=3) +
+  geom_text_repel(aes(label=Samples)) +
+  scale_colour_manual(values=cbPalette)+
+  theme_bw() +
+  # geom_density2d(alpha=.5)+
+  geom_polygon(alpha=.2)+
+  xlab(paste0("PC1: ",pc1v,"% variance")) +
+  ylab(paste0("PC2: ",pc2v,"% variance")) 
+
+#Run adonis for significance
+adonis(pca$x ~ treat, data = pca_s, method='eu', na.rm = TRUE)
+
+
+
+
+#No prinicple is significant
+
+#######################################################################
+######################################################################
+# Principle coordiante analysis
+
+#Redo the file formating of files
+
+#read in counts
+counts = read.table("SymCounts.csv")
+# how many genes we have total?
+nrow(counts) #22495
+# how the data look? 
+#head(counts)
+# how many genes have mean count >=3?
+means=apply(counts,1,mean)
+table(means>=3)
+#FALSE  TRUE 
+
+
+hist(log(means,10), main="Histogram of mean values")
+# distribution of total counts among samples: are there samples with less than 2SD counts?
+smeans=apply(counts,2,sum)
+lsm=log(smeans,10)
+hist(lsm,breaks=12)
+sdl=sd(lsm)
+bads=which(mean(lsm)-lsm > 2*sdl)
+bads
+# removing all genes with mean count less than 3
+countData=counts[means>=3, ]
+nrow(countData) #11223
+m <- as.matrix(countData)
+storage.mode(m) = "integer"
+head(m)
+treat=c( "Cond_A", "Cond_A", "Cond_A" , "Cond_A", "Cond_B","Cond_B", "Cond_B", "Cond_B", "Cond_C","Cond_C","Cond_C","Cond_C","Cond_D","Cond_D","Cond_D")
+colony=as.factor (c( "Col_b", "Col_a", "Col_c", "Col_d", "Col_a","Col_b", "Col_c", "Col_d", "Col_b","Col_a","Col_c","Col_d","Col_b","Col_a","Col_c"))
+g=data.frame(treat, colony)
+#g=data.frame(treat)
+g
+colData<- g
+
+# make big dataframe
+dds<-DESeq2::DESeqDataSetFromMatrix(countData=m, colData=colData, design=~treat+colony) 
+dds<-DESeq(dds)
+
+#Vsd=varianceStabilizingTransformation(dds)
+rl=rlog(dds)
+e=ExpressionSet(assay(rl), AnnotatedDataFrame(as.data.frame(colData(rl))))
+save(dds,colData,m,rl,file="initial.RData")
+# generating normalized variance-stabilized data for PCoA and heatmaps
+load("initial.RData")
+vsd=assay(rl)
+snames=paste(colnames(m),g,sep=".")
+colnames(vsd)=snames
+save(vsd,g,file="vsd.RData")
+# heatmap and hierarchical clustering:
+load("vsd.RData")
+
+
+# Principle coordiante analysis
+conditions=g
+g=paste(treat,colony,sep=".")
+#colors and subsetters:
+indcols=rep("black",ncol(vsd))
+indcols[g=="Cond_A"]="purple"
+indcols[g=="Cond_B"]="red"
+indcols[g=="Cond_C"]="green2"
+indcols[g=="Cond_D"]="blue"
+dds.pcoa=capscale(dist(t(vsd),method="manhattan")~1)
+
+# how many good PC's we have? 
+plot(dds.pcoa$CA$eig/sum(dds.pcoa$CA$eig))
+scores=dds.pcoa$CA$u
+
+# plotting PCoA
+axes2plot=c(1,2)
+plot(scores[,axes2plot],col=indcols,pch=15)
+ordispider(scores,g,label=T,col="grey")
+#ordiellipse(scores,conditions$trt,label=T,draw="polygon",col="grey90",cex=2)
+ordihull(scores,g,draw="polygon",col="grey",cex=2)
+# neighbor-joining tree of samples (based on significant PCo's):
+tre=nj(dist(scores[,1:4]))
+plot(tre,cex=0.8,type="unrooted")
+
+
+
+```
+We also created the PCoA in ggplot to make it prettier. 
+
+```{r}
+#####PCoA in ggplot r########
+a.con=data.frame(cbind(colony,treat))
+a.con
+vsd=assay(rl)
+snames=paste(colnames(countData),a.con[,2],sep=".")
+colnames(vsd)=snames
+save(vsd,a.con,file="vsd.RData")
+load("vsd.RData")
+conditions=a.con
+conditions$ibyt=paste(conditions[,1],conditions[,2],sep=".")
+dds.pcoa=capscale(dist(t(vsd),method="manhattan")~1)
+scores=dds.pcoa$CA$u
+
+data.scores <- as.data.frame(scores)  #Using the scores function from vegan to extract the site scores and convert to a data.frame
+data.scores$sample <- rownames(data.scores)  # create a column of sample names, from the rownames of data.scores
+data.scores$grp <- a.con$treat #  add group variable
+data.scores$colony <- a.con$colony
+library(dplyr)
+hull_cyl <- data.scores %>%
+  group_by(grp) %>%
+  dplyr::slice(chull(MDS1, MDS2))
+
+p <- ggplot(data.scores, aes(MDS1, MDS2)) + geom_point(shape = 21)
+p + aes(fill = factor(grp)) + geom_polygon(data = hull_cyl, alpha = 0.5, color='black')+
+  geom_text(data=data.scores,
+            aes(MDS1, MDS2 , label = colony),
+            color= "black", size=7, fontface = 2,
+            hjust = 0.5, vjust = 0.5)+
+scale_fill_discrete(name = "Cond", labels = c("High Flow + Heat", "High Flow + No Heat", "Low Flow + Heat","Low Flow + No Heat"))+
+  labs(title="PCoA Symbiont")
+
+
+```
+The PCA and PCoA found the variance wasn't significantly explained by treatment group. However the clustering still shows some interesting things. It appears there is clustering according to flow and that the high flow + heat and high flow no heat are clustering closer compared to the low flow + heat and the low flow + no heat. Additionally, colonies 2 and 3 are often shown to cluster together within the treatment compared to the other two colonies.
+
+We also ran a GO_MWU analysis with these samples. Information for this is on the github page and in the GO_MWU.R script, but the two most relevant results can be found below. 
+
+High flow + no heat vs Low flow + no heat Biological Processes. 
+Red is upregulated under high flow and blue is upregulated under low flow 
+
+```{r pressure1, echo=FALSE, fig.cap="High flow + no heat vs Low flow + no heat", out.width = '100%'}
+knitr::include_graphics("BvsD_BP.png")
+```
+
+
+Low flow + heat vs Low flow + no heat Biological Processes. 
+Red is upregulated under heat and blue is upregulated under no heat 
+
+```{r pressure2, echo=FALSE, fig.cap="Low flow heat vs Low flow + no heat", out.width = '100%'}
+knitr::include_graphics("CvsD_BP.png")
+```
+
+
+#Conclusions:
+
+We find that the gene expression of symbionts of A. cf. pulchra cluster differently than their hosts under the same conditions. Symbionts show different expression patterns under different flow environments when exposed to ambient temperature. This difference is categorized by an increase of "ribosomal" GO terms- which is associated with growth, under low flow and an increase of metabolism terms under high flow. Additionally, under high flow symbionts do not show differential expression between heat stress and no heat stress conditions, while under low flow they do. These differences are characterized by an increase in "ribosomal" GO terms under no heat stress and cell differentiation under heat stress. We also found incorporating colony in our deseq2 model decreases the number of differentially expressed genes in these comparisons (the other comparisons remain low). More analyses will need to be run to account for possible genotype specific expression patterns that could be driving some of these differences. Overall, our results suggest symbionts regulate their expression differently under different flow conditions, with the host possibly buffering expression under high flow which leads to our observed outcome of few differentially expressed genes between high flow no heat and high flow heat. 
+
+
